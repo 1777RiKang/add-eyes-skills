@@ -774,7 +774,11 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
 
     if is_ollama:
         # Ollama models
-        ollama_model = preset.get("ollama_model", model_name.split(":", 1)[1])
+        ollama_model = preset.get("ollama_model")
+        if not ollama_model:
+            # Extract model name after "ollama:" prefix, with fallback
+            parts = model_name.split(":", 1)
+            ollama_model = parts[1] if len(parts) > 1 else "minicpm-v"
         payload = build_ollama_payload(ollama_model, b64, mime, question, max_tokens)
         headers = {
             "Content-Type": "application/json",
