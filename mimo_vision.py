@@ -325,25 +325,21 @@ def ocr_fallback(image_path=None, b64=None, mime=None):
     import tempfile
 
     # If b64 data provided, write to temp file for OCR processing
+    temp_file = None
     if b64 and not image_path:
         try:
             # Decode base64 to bytes
             img_bytes = base64.b64decode(b64)
-            # Determine extension from mime type
+            # Determine extension from mime type using reverse MIME_MAP
             ext = ".png"
             if mime:
-                mime_to_ext = {
-                    "image/jpeg": ".jpg",
-                    "image/png": ".png",
-                    "image/gif": ".gif",
-                    "image/webp": ".webp",
-                    "image/bmp": ".bmp",
-                }
-                ext = mime_to_ext.get(mime, ".png")
+                reverse_mime = {v: k for k, v in MIME_MAP.items()}
+                ext = reverse_mime.get(mime, ".png")
             # Write to temp file
             with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
                 f.write(img_bytes)
                 image_path = f.name
+                temp_file = f.name
         except Exception as e:
             return f"[Error creating temp file for OCR: {e}]"
 
@@ -412,17 +408,25 @@ def ocr_fallback(image_path=None, b64=None, mime=None):
                 f"  (Note: pytesseract requires system tesseract: https://github.com/tesseract-ocr/tesseract)"
             )
 
-    # Try each in order
-    result = _try_easyocr()
-    if result:
-        return result
+    # Try each in order (inside try/finally for temp file cleanup)
+    try:
+        result = _try_easyocr()
+        if result:
+            return result
 
-    result = _try_tesseract()
-    if result:
-        return result
+        result = _try_tesseract()
+        if result:
+            return result
 
-    result = _pillow_info()
-    return result
+        result = _pillow_info()
+        return result
+    finally:
+        # Clean up temp file if we created one
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+            except OSError:
+                pass
 
 
 def auto_route(message, attachments=None):
@@ -494,7 +498,7 @@ def auto_route(message, attachments=None):
         "看这张图", "看图", "图片", "截图", "界面", "页面", "图表", "设计稿",
         "帮我看看", "分析这个", "这是什么", "识别", "读取图片", "看看这个",
         # English
-        "look at this", "image", "screenshot", "picture", "diagram", "chart",
+        "look at this", "this image", "the image", "screenshot", "picture", "diagram", "chart",
         "analyze this", "what is this", "see this", "check this",
     ]
 
@@ -504,12 +508,26 @@ def auto_route(message, attachments=None):
             break
 
     # ── 5. Extract question and context ───────────────────────────
-    # Try to separate question from context
+    # Heuristic: find the line most likely to be a question
     lines = message.strip().split('\n')
     if len(lines) > 1:
-        # Multi-line: last line is likely the question, rest is context
-        result["context"] = '\n'.join(lines[:-1])
-        result["question"] = lines[-1]
+        question_indicators = ['?', '？', '什么', '怎么', '为什么', '如何', '哪个',
+                               'what', 'how', 'why', 'which', 'describe', 'explain',
+                               '帮我', '分析', '看看', '看下']
+        question_line = None
+        context_lines = []
+        for line in lines:
+            if question_line is None and any(ind in line.lower() for ind in question_indicators):
+                question_line = line
+            else:
+                context_lines.append(line)
+        if question_line:
+            result["question"] = question_line
+            result["context"] = '\n'.join(context_lines) if context_lines else ""
+        else:
+            # Fallback: last line is question
+            result["context"] = '\n'.join(lines[:-1])
+            result["question"] = lines[-1]
     else:
         # Single line: the whole message is the question
         result["question"] = message
@@ -792,26 +810,35 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
         print(f"[warn] API key will be sent in plaintext!", file=sys.stderr)
 
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        base_url,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
 
     # Retry logic with exponential backoff
     max_retries = 3
     last_error = None
     for attempt in range(max_retries):
+        # Recreate Request each retry (avoid stale socket state)
+        req = urllib.request.Request(
+            base_url,
+            data=body,
+            headers=headers,
+            method="POST",
+        )
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 break  # Success, exit retry loop
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"API error ({e.code}) for model '{model_name}':\n{err_body}"
-            ) from e
+            # 5xx = server error → retry; 4xx = client error → fail immediately
+            if e.code >= 500 and attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"[warn] Server error ({e.code}), retrying in {wait_time}s... ({attempt+1}/{max_retries})", file=sys.stderr)
+                import time
+                time.sleep(wait_time)
+                last_error = e
+            else:
+                raise RuntimeError(
+                    f"API error ({e.code}) for model '{model_name}':\n{err_body}"
+                ) from e
         except urllib.error.URLError as e:
             last_error = e
             if attempt < max_retries - 1:
@@ -959,9 +986,13 @@ def main():
                 model_name=args.model,
                 context=args.context,
             )
-        except EnvironmentError as e:
-            print(f"Error: {e}")
-            sys.exit(1)
+        except (EnvironmentError, RuntimeError) as e:
+            if args.ocr:
+                print(f"[warn] Vision API failed ({type(e).__name__}), falling back to OCR...")
+                answer = ocr_fallback(b64=b64, mime=mime)
+            else:
+                print(f"Error: {e}")
+                sys.exit(1)
         print(answer)
         return
 
