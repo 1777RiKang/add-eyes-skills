@@ -1,6 +1,6 @@
-# MiMo Vision Skill
+# Add Eyes Skills 👁️
 
-> **纯文本模型的「视觉桥接」** — 给 DeepSeek V4 Flash/Pro 等不支持多模态的模型装上「眼睛」  
+> **给纯文本模型装上眼睛** — 让 DeepSeek V4 Flash/Pro 等不支持多模态的模型也能"看懂"图片  
 > Vision bridge for text-only LLMs — let DeepSeek V4, etc. "see" images via external vision APIs
 
 [![Reasonix Skill](https://img.shields.io/badge/Reasonix-Skill-blue)](#)
@@ -12,7 +12,7 @@
 你的 AI 模型如果是纯文本模型（例如 **DeepSeek V4 Flash**、**V4 Pro**），它**看不懂图片**。
 用户贴了截图、报错、设计稿……模型都只能干瞪眼。
 
-**MiMo Vision** 的解决思路：
+**Add Eyes Skills** 的解决思路：
 
 ```
 用户贴图 ──→ 纯文本模型看不见 ──→ Skill 编码图片

@@ -1,16 +1,16 @@
 ---
-name: vision
+name: add-eyes
 description: Vision bridge for text-only models (DeepSeek V4, etc.). Invoke when user pastes an image and your model cannot see it — this skill delegates to external vision APIs and returns a description.
 run_as: inline
 ---
 
-# MiMo Vision — 纯文本模型的「视觉桥接」Skill
+# MiMo Vision — 纯文本模型的「视觉桥接」Skill（Add Eyes）
 
 ## 这是什么？
 
 如果你的 AI 模型**不支持多模态**（例如 DeepSeek V4 Flash、V4 Pro 等纯文本模型），当用户贴图时它"看不见"。
 
-这个 Skill 就是给模型配一副**外挂眼睛**：
+这个 Skill 就是给模型**装上眼睛**：
 
 ```
 用户贴图 → 纯文本模型看不见 → Skill 调用外部视觉 API
