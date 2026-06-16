@@ -301,8 +301,8 @@ def build_gemini_payload(model_name, b64, mime, question, max_tokens):
     }
 
 
-def build_ollama_payload(model_name, b64, mime, question, max_tokens):
-    """Build payload for Ollama /api/generate API."""
+def build_ollama_payload(model_name, b64, _mime, question, max_tokens):
+    """Build payload for Ollama /api/generate API. MIME type not needed by Ollama."""
     return {
         "model": model_name,
         "prompt": question,
@@ -468,13 +468,13 @@ def auto_route(message, attachments=None):
                     result["image_paths"].append(path)
 
     # ── 2. Check for image references in message ──────────────────
-    # Pattern 1: Reasonix attachments
+    # Pattern 1: Reasonix attachments (case-insensitive for extension)
     import re
     attachment_pattern = r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
     matches = re.findall(attachment_pattern, message_lower)
     if matches:
         result["needs_vision"] = True
-        for match in re.finditer(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message):
+        for match in re.finditer(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message, re.IGNORECASE):
             result["image_paths"].append(match.group(0))
 
     # Pattern 2: Generic file paths (Windows C:\... or Unix /...)
@@ -482,7 +482,7 @@ def auto_route(message, attachments=None):
     path_matches = re.findall(generic_path_pattern, message_lower)
     if path_matches:
         result["needs_vision"] = True
-        for match in re.finditer(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message):
+        for match in re.finditer(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message, re.IGNORECASE):
             if match.group(0) not in result["image_paths"]:
                 result["image_paths"].append(match.group(0))
 
@@ -543,7 +543,7 @@ def auto_route(message, attachments=None):
         )
         if is_just_path:
             result["question"] = "请详细描述这张图片的内容，包括布局、颜色、文字、元素等。"
-            result["context"] = result["question"]  # Use the path as context
+            result["context"] = ""  # No meaningful context when user just pastes an image
 
     return result
 
@@ -567,9 +567,6 @@ def auto_detect_backends():
 
     # ── 1. Check Ollama (local) ───────────────────────────────────
     try:
-        import urllib.request
-        import json
-
         # Check if Ollama is running
         ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         req = urllib.request.Request(f"{ollama_host}/api/tags")
@@ -661,8 +658,8 @@ def smart_question(question, context=None):
     # Analyze context keywords
     context_lower = context.lower()
 
-    # Code/programming related
-    code_keywords = ["代码", "code", "bug", "error", "错误", "调试", "debug", "函数", "function",
+    # Code/programming related (excluding error-specific keywords)
+    code_keywords = ["代码", "code", "函数", "function",
                      "变量", "variable", "类", "class", "方法", "method", "接口", "api",
                      "数据库", "database", "sql", "查询", "query", "框架", "framework", "库", "library"]
 
@@ -674,7 +671,7 @@ def smart_question(question, context=None):
     data_keywords = ["数据", "data", "图表", "chart", "分析", "analysis", "统计", "statistics",
                      "指标", "metric", "报告", "report", "趋势", "trend", "可视化", "visualization"]
 
-    # Error/debugging related
+    # Error/debugging related (owns error/bug/debug keywords exclusively)
     error_keywords = ["错误", "error", "异常", "exception", "bug", "问题", "issue", "失败", "fail",
                       "崩溃", "crash", "日志", "log", "调试", "debug", "堆栈", "stack"]
 
@@ -909,7 +906,7 @@ def main():
                         help="Question about the image (default: describe)")
     parser.add_argument("--model", "-m",
                         default=os.environ.get("MIMO_MODEL", "mimo-v2.5"),
-                        help=f"Vision backend to use (default: mimo-v2.5)")
+                        help=f"Vision backend to use (default: env MIMO_MODEL or mimo-v2.5)")
     parser.add_argument("--ocr", action="store_true",
                         help="Use OCR fallback when no vision API key is set (requires: pip install pillow pytesseract easyocr)")
     parser.add_argument("--context", "-c",
