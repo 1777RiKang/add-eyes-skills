@@ -27,8 +27,8 @@
 ### 1. 安装 & 配置
 
 ```bash
-git clone https://github.com/<your-org>/mimo-vision-skill.git
-cd mimo-vision-skill
+git clone https://github.com/1777RiKang/add-eyes-skills.git
+cd add-eyes-skills
 ```
 
 ### 2. 配置视觉后端 Key（至少一个）

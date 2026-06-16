@@ -65,6 +65,34 @@ DEFAULT_CONFIG = {
     "max_tokens": 4096,
 }
 
+def _find_preset(model_name):
+    """Find the best matching preset for a model name.
+
+    Handles cases like:
+    - "ollama:minicpm-v" -> exact match
+    - "ollama:minicpm-v:latest" -> prefix match
+    - "gpt-4o-2024-01-01" -> prefix match
+    """
+    # Exact match first
+    if model_name in MODEL_PRESETS:
+        return MODEL_PRESETS[model_name]
+
+    # Prefix match: try progressively shorter prefixes
+    # This handles "ollama:minicpm-v:latest" -> "ollama:minicpm-v"
+    parts = model_name.split(":")
+    if len(parts) > 2:
+        prefix = ":".join(parts[:2])
+        if prefix in MODEL_PRESETS:
+            return MODEL_PRESETS[prefix]
+
+    # Try matching by model family (e.g. "gpt-4o-xxx" -> "gpt-4o")
+    for preset_name, preset in MODEL_PRESETS.items():
+        if model_name.startswith(preset_name):
+            return preset
+
+    return None
+
+
 # ── Model presets ─────────────────────────────────────────────────────
 MODEL_PRESETS = {
     "mimo-v2.5": {
@@ -286,12 +314,41 @@ def build_ollama_payload(model_name, b64, mime, question, max_tokens):
     }
 
 
-def ocr_fallback(image_path):
+def ocr_fallback(image_path=None, b64=None, mime=None):
     """OCR fallback chain: easyocr → pytesseract → Pillow basic info.
 
     Used when --ocr is passed and no vision API key is available.
+    Accepts either a file path or base64-encoded image data.
+
     Returns extracted text (OCR) or image metadata (Pillow).
     """
+    import tempfile
+
+    # If b64 data provided, write to temp file for OCR processing
+    if b64 and not image_path:
+        try:
+            # Decode base64 to bytes
+            img_bytes = base64.b64decode(b64)
+            # Determine extension from mime type
+            ext = ".png"
+            if mime:
+                mime_to_ext = {
+                    "image/jpeg": ".jpg",
+                    "image/png": ".png",
+                    "image/gif": ".gif",
+                    "image/webp": ".webp",
+                    "image/bmp": ".bmp",
+                }
+                ext = mime_to_ext.get(mime, ".png")
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                f.write(img_bytes)
+                image_path = f.name
+        except Exception as e:
+            return f"[Error creating temp file for OCR: {e}]"
+
+    if not image_path or not os.path.isfile(image_path):
+        return "[Error: No valid image path for OCR]"
 
     def _try_easyocr():
         """Try easyocr (offline, downloads model on first run)."""
@@ -407,15 +464,23 @@ def auto_route(message, attachments=None):
                     result["image_paths"].append(path)
 
     # ── 2. Check for image references in message ──────────────────
-    # Pattern: @.reasonix/attachments/xxx.png
+    # Pattern 1: Reasonix attachments
     import re
     attachment_pattern = r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
     matches = re.findall(attachment_pattern, message_lower)
     if matches:
         result["needs_vision"] = True
-        # Extract full paths
         for match in re.finditer(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message):
             result["image_paths"].append(match.group(0))
+
+    # Pattern 2: Generic file paths (Windows C:\... or Unix /...)
+    generic_path_pattern = r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
+    path_matches = re.findall(generic_path_pattern, message_lower)
+    if path_matches:
+        result["needs_vision"] = True
+        for match in re.finditer(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message):
+            if match.group(0) not in result["image_paths"]:
+                result["image_paths"].append(match.group(0))
 
     # ── 3. Check for image file references ────────────────────────
     image_file_pattern = r'[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
@@ -514,26 +579,26 @@ def auto_detect_backends():
         pass
 
     # ── 2. Check Cloud APIs ───────────────────────────────────────
-    cloud_backends = [
-        ("mimo-v2.5", "MIMO_API_KEY", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
-        ("gpt-4o", "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions"),
-        ("gpt-4-turbo", "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions"),
-        ("claude-3-5-sonnet-20241022", "ANTHROPIC_API_KEY", "https://api.anthropic.com/v1/messages"),
-        ("claude-sonnet-4-6", "ANTHROPIC_API_KEY", "https://api.anthropic.com/v1/messages"),
-        ("gemini-1.5-pro", "GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"),
-        ("gemini-1.5-flash", "GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"),
-    ]
+    # Use MODEL_PRESETS directly to avoid duplication and env var errors
+    for backend_name, preset in MODEL_PRESETS.items():
+        # Skip Ollama models (already handled above)
+        if backend_name.startswith("ollama:"):
+            continue
 
-    for backend_name, api_key_env, default_url in cloud_backends:
+        api_key_env = preset.get("api_key_env", "")
+        if not api_key_env:
+            continue
+
         api_key = os.environ.get(api_key_env, "")
         if api_key:
-            base_url_env = f"{backend_name.split('-')[0].upper()}_BASE_URL"
-            base_url = os.environ.get(base_url_env, default_url)
+            base_url_env = preset.get("base_url_env", "")
+            base_url = os.environ.get(base_url_env, preset.get("default_base_url", ""))
 
             available.append(backend_name)
             details[backend_name] = {
                 "type": "cloud",
                 "api_key_env": api_key_env,
+                "base_url_env": base_url_env,
                 "base_url": base_url,
                 "status": "available",
             }
@@ -577,15 +642,14 @@ def smart_question(question, context=None):
 
     # Analyze context keywords
     context_lower = context.lower()
-    question_lower = question.lower()
 
     # Code/programming related
     code_keywords = ["代码", "code", "bug", "error", "错误", "调试", "debug", "函数", "function",
-                     "变量", "variable", "类", "class", "方法", "method", "接口", "api", "接口",
+                     "变量", "variable", "类", "class", "方法", "method", "接口", "api",
                      "数据库", "database", "sql", "查询", "query", "框架", "framework", "库", "library"]
 
     # UI/frontend related
-    ui_keywords = ["界面", "ui", "界面", "design", "设计", "布局", "layout", "组件", "component",
+    ui_keywords = ["界面", "ui", "design", "设计", "布局", "layout", "组件", "component",
                    "样式", "style", "css", "html", "前端", "frontend", "页面", "page", "截图", "screenshot"]
 
     # Data/analysis related
@@ -652,7 +716,7 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
 
     # ── Determine model config ────────────────────────────────────
     model_name = model_name or os.environ.get("MIMO_MODEL", "mimo-v2.5")
-    preset = MODEL_PRESETS.get(model_name)
+    preset = _find_preset(model_name)
 
     if preset is None:
         # Fallback: treat as OpenAI-compatible custom model
@@ -722,6 +786,11 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
         }
 
     # ── Send request ──────────────────────────────────────────────
+    # Warn about non-HTTPS connections (security)
+    if base_url.startswith("http://") and not base_url.startswith("http://localhost"):
+        print(f"[warn] Using non-HTTPS connection: {base_url}", file=sys.stderr)
+        print(f"[warn] API key will be sent in plaintext!", file=sys.stderr)
+
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         base_url,
@@ -730,18 +799,30 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"API error ({e.code}) for model '{model_name}':\n{err_body}"
-        ) from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(
-            f"Network error connecting to {base_url}:\n{e.reason}"
-        ) from e
+    # Retry logic with exponential backoff
+    max_retries = 3
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                break  # Success, exit retry loop
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"API error ({e.code}) for model '{model_name}':\n{err_body}"
+            ) from e
+        except urllib.error.URLError as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # 1, 2, 4 seconds
+                print(f"[warn] Network error, retrying in {wait_time}s... ({attempt+1}/{max_retries})", file=sys.stderr)
+                import time
+                time.sleep(wait_time)
+            else:
+                raise RuntimeError(
+                    f"Network error connecting to {base_url} after {max_retries} attempts:\n{last_error.reason}"
+                ) from last_error
 
     # ── Parse response by API type ────────────────────────────────
     if is_ollama:
@@ -901,10 +982,11 @@ def main():
 
     try:
         answer = ask_with_image(args.image_path, args.question, args.model, context=args.context)
-    except EnvironmentError:
-        # No API key set — try OCR fallback if --ocr is enabled
+    except (EnvironmentError, RuntimeError) as e:
+        # EnvironmentError: No API key set
+        # RuntimeError: Network error or API error
         if args.ocr:
-            print(f"[warn] No vision API key configured, falling back to OCR...")
+            print(f"[warn] Vision API failed ({type(e).__name__}), falling back to OCR...")
             answer = ocr_fallback(args.image_path)
         else:
             raise  # Re-raise the original error
