@@ -1,6 +1,6 @@
 # Add Eyes Skills 👁️
 
-> **给纯文本模型装上眼睛** — 让 DeepSeek V4、MiMo V2.5 Pro 等不支持多模态的模型也能"看懂"图片  
+> **帮纯文本模型获取图片描述** — 让 DeepSeek V4、MiMo V2.5 Pro 等不支持多模态的模型也能"看懂"图片  
 > Vision bridge for text-only LLMs — let DeepSeek V4, etc. "see" images via external vision APIs
 
 [![Reasonix Skill](https://img.shields.io/badge/Reasonix-Skill-blue)](#)
@@ -9,19 +9,16 @@
 
 ---
 
-## 为什么需要这个？
+## 这是什么？
 
-你的 AI 模型如果是纯文本模型（例如 **DeepSeek V4 Flash**、**MiMo V2.5 Pro**），它**看不懂图片**。
-
-用户贴了截图、报错、设计稿……模型都只能说"我无法查看图片"。
-
-**Add Eyes Skills** 的解决思路——**能力融合**：
+纯文本模型看不懂图片。这个工具帮你调用外部视觉 API 获取图片的文字描述，然后交给你的模型处理。
 
 ```
-纯文本模型（强推理） + 简单多模态模型（能看图）
-    ↓ 融合
-既能看图，又能推理
+用户贴图 → 你的模型看不见 → 本工具调用视觉 API
+    → 返回文字描述 → 你的模型拿到描述继续推理
 ```
+
+**注意：** 这不是"能力融合"，是"视觉桥接"——你的模型拿到的是文字描述，不是真正的视觉感知。描述质量取决于视觉后端。
 
 ---
 
@@ -38,7 +35,7 @@
 | 📝 **OCR 降级** | 无 API Key 时自动降级为 OCR 文字提取 |
 | 🔄 **自动重试** | 指数退避重试，5xx/网络错误自动恢复 |
 | 🌐 **多平台** | Reasonix、Claude Code、Cursor、GitHub Copilot |
-| 🔒 **零依赖** | 纯 Python 标准库，无需 pip install |
+| 🔒 **核心零依赖** | 纯 Python 标准库即可运行（高级功能如 OCR/区域聚焦需可选依赖） |
 
 ---
 
@@ -244,7 +241,8 @@ python add_eyes.py --detect-backends
 ### OCR 降级（无 API Key 时）
 
 ```bash
-# 安装 OCR 依赖（可选）
+# 安装 OCR 依赖（可选，不装也能用）
+# 注意：easyocr 首次运行会下载约 200MB 模型，pytesseract 需要额外安装系统级 tesseract
 pip install pillow pytesseract easyocr
 
 # 使用 OCR 模式

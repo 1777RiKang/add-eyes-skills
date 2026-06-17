@@ -33,11 +33,14 @@ import os
 import io
 
 if sys.platform == "win32":
-    # Force UTF-8 output on Windows
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    # Set console code page to UTF-8
-    os.system("chcp 65001 >nul 2>&1")
+    # Force UTF-8 output on Windows (more Pythonic than os.system("chcp"))
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        # Python < 3.7 fallback
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import base64
 import json
@@ -980,6 +983,11 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
     if base_url.startswith("http://") and not base_url.startswith("http://localhost"):
         print(f"[warn] Using non-HTTPS connection: {base_url}", file=sys.stderr)
         print(f"[warn] API key will be sent in plaintext!", file=sys.stderr)
+
+    # In verbose mode, mask API keys in URLs to prevent leaks
+    if is_gemini and api_key:
+        masked_url = base_url.replace(api_key, f"{api_key[:6]}***{api_key[-4:]}")
+        print(f"[info] Request URL: {masked_url}", file=sys.stderr)
 
     body = json.dumps(payload).encode("utf-8")
 
