@@ -756,61 +756,108 @@ def auto_detect_backends():
 
 
 def smart_question(question, context=None):
-    """Generate a smart question based on user context.
+    """Enhance user question with context hints.
 
-    Analyzes the conversation context to generate more targeted questions
-    for the vision model, improving accuracy of image analysis.
+    Design principle: AUGMENT, don't REPLACE.
+    - User's original question stays at the front (highest weight)
+    - Context provides lightweight hints as a prefix
+    - Multiple categories can combine (UI + error)
+    - Extracts concrete info from context (error messages, tech stack)
+    - Auto-detects language for hint prefix
 
     Args:
         question: Original user question
         context: Conversation context (optional)
 
     Returns:
-        Enhanced question for the vision model
+        Enhanced question (original question preserved at front)
     """
-    if not context:
+    if not context or not question:
         return question
 
-    # Analyze context keywords
     context_lower = context.lower()
 
-    # Code/programming related (excluding error-specific keywords)
-    code_keywords = ["代码", "code", "函数", "function",
-                     "变量", "variable", "类", "class", "方法", "method", "接口", "api",
-                     "数据库", "database", "sql", "查询", "query", "框架", "framework", "库", "library"]
+    # ── Category detection (non-exclusive, can combine) ───────────
+    # Code/programming
+    code_keywords = ["代码", "code", "函数", "function", "变量", "variable",
+                     "类", "class", "方法", "method", "接口", "api",
+                     "数据库", "database", "sql", "查询", "query",
+                     "框架", "framework", "库", "library"]
 
-    # UI/frontend related
-    ui_keywords = ["界面", "ui", "design", "设计", "布局", "layout", "组件", "component",
-                   "样式", "style", "css", "html", "前端", "frontend", "页面", "page", "截图", "screenshot"]
+    # UI/frontend
+    ui_keywords = ["界面", "ui", "design", "设计", "布局", "layout",
+                   "组件", "component", "样式", "style", "css", "html",
+                   "前端", "frontend", "页面", "page", "截图", "screenshot",
+                   "按钮", "button", "输入框", "input", "导航", "nav"]
 
-    # Data/analysis related
-    data_keywords = ["数据", "data", "图表", "chart", "分析", "analysis", "统计", "statistics",
-                     "指标", "metric", "报告", "report", "趋势", "trend", "可视化", "visualization"]
+    # Data/analysis
+    data_keywords = ["数据", "data", "图表", "chart", "分析", "analysis",
+                     "统计", "statistics", "指标", "metric", "报告", "report",
+                     "趋势", "trend", "可视化", "visualization"]
 
-    # Error/debugging related (owns error/bug/debug keywords exclusively)
-    # Note: "问题" is too generic (e.g. "布局问题" is UI, not error), so we use more specific error terms
-    error_keywords = ["错误", "error", "异常", "exception", "bug", "报错", "issue", "失败", "fail",
-                      "崩溃", "crash", "日志", "log", "调试", "debug", "堆栈", "stack", "traceback",
+    # Error/debugging
+    error_keywords = ["错误", "error", "异常", "exception", "bug", "报错",
+                      "失败", "fail", "崩溃", "crash", "日志", "log",
+                      "调试", "debug", "堆栈", "stack", "traceback",
                       "报错信息", "错误信息", "error message"]
 
-    # Check if context matches any category
-    is_code_context = any(kw in context_lower for kw in code_keywords)
-    is_ui_context = any(kw in context_lower for kw in ui_keywords)
-    is_data_context = any(kw in context_lower for kw in data_keywords)
-    is_error_context = any(kw in context_lower for kw in error_keywords)
+    detected = []
+    if any(kw in context_lower for kw in error_keywords):
+        detected.append("error")
+    if any(kw in context_lower for kw in code_keywords):
+        detected.append("code")
+    if any(kw in context_lower for kw in ui_keywords):
+        detected.append("ui")
+    if any(kw in context_lower for kw in data_keywords):
+        detected.append("data")
 
-    # Generate enhanced question
-    if is_error_context:
-        return f"请分析这张图片中的错误信息、异常堆栈或问题描述。重点关注错误类型、错误消息、发生位置和可能的解决方案。原始问题：{question}"
-    elif is_code_context:
-        return f"请分析这张图片中的代码内容。识别代码语言、函数结构、变量定义、逻辑流程，并指出可能的语法错误或逻辑问题。原始问题：{question}"
-    elif is_ui_context:
-        return f"请分析这个界面的布局结构、组件组成、颜色搭配、字体样式和交互元素。识别可能的UI问题或改进建议。原始问题：{question}"
-    elif is_data_context:
-        return f"请分析这张图片中的数据、图表或统计信息。识别数据类型、趋势、关键指标和异常值。原始问题：{question}"
-    else:
-        # Default: use original question
+    # No category matched → return original
+    if not detected:
         return question
+
+    # ── Extract concrete info from context ────────────────────────
+    hints = []
+
+    # Try to extract error message patterns (e.g. "TypeError: xxx")
+    import re
+    error_patterns = re.findall(
+        r'((?:Type|Reference|Syntax|Runtime|Value|Attribute|Key|Index|Name|Import|Module|File)Error[:\s][^\n]{5,80})',
+        context
+    )
+    if error_patterns:
+        hints.append(error_patterns[0].strip())
+
+    # Try to extract tech stack mentions
+    tech_patterns = re.findall(
+        r'\b(React|Vue|Angular|Next\.js|Nuxt|Django|Flask|FastAPI|Express|Spring|Laravel|Tailwind|Bootstrap|TypeScript|JavaScript|Python|Java|Go|Rust)\b',
+        context, re.IGNORECASE
+    )
+    if tech_patterns:
+        hints.extend(list(set(tech_patterns))[:3])
+
+    # ── Build lightweight prefix hint ─────────────────────────────
+    # Detect language: Chinese or English
+    has_cjk = any('\u4e00' <= c <= '\u9fff' for c in question)
+    is_english = not has_cjk
+
+    # Category hint tags
+    category_tags = {
+        "error": "error/debug" if is_english else "错误/调试",
+        "code": "code" if is_english else "代码",
+        "ui": "UI/frontend" if is_english else "UI/界面",
+        "data": "data/chart" if is_english else "数据/图表",
+    }
+
+    tag_str = " + ".join(category_tags[c] for c in detected if c in category_tags)
+    hint_parts = [f"[{tag_str}]"]
+
+    if hints:
+        hint_parts.append(f"[context: {'; '.join(hints[:2])}]")
+
+    prefix = " ".join(hint_parts)
+
+    # ── Final result: prefix + original question (original stays dominant) ──
+    return f"{prefix} {question}"
 
 
 def smart_focus(question, context=None):
