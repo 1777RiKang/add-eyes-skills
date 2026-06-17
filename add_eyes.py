@@ -1320,7 +1320,7 @@ def main():
             sys.exit(1)
 
     try:
-        answer = ask_with_image(args.image_path, args.question, args.model,
+        answer = ask_with_image(args.image_path, enhanced_question, args.model,
                                 context=args.context, region=region, focus=args.focus)
     except (EnvironmentError, RuntimeError) as e:
         # EnvironmentError: No API key set
