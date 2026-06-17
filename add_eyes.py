@@ -784,6 +784,74 @@ def smart_question(question, context=None):
         return question
 
 
+def smart_focus(question, context=None):
+    """Auto-detect if region focusing is needed and which region.
+
+    Analyzes the question and context to determine:
+    1. Whether focusing is needed
+    2. Which region to focus on
+
+    Args:
+        question: User's question
+        context: Conversation context (optional)
+
+    Returns:
+        Tuple of (should_focus: bool, focus_keyword: str or None)
+    """
+    combined = f"{question or ''} {context or ''}".lower()
+
+    # ── 1. Explicit region keywords in question ──────────────────
+    # Direct mention of a region → definitely focus
+    region_keywords = {
+        # Chinese
+        "左上": "左上", "左上角": "左上",
+        "右上": "右上", "右上角": "右上",
+        "左下": "左下", "左下角": "左下",
+        "右下": "右下", "右下角": "右下",
+        "顶部": "顶部", "上方": "顶部", "上边": "顶部", "上面": "顶部",
+        "底部": "底部", "下方": "底部", "下边": "底部", "下面": "底部",
+        "左侧": "左侧", "左边": "左侧", "左半": "左侧",
+        "右侧": "右侧", "右边": "右侧", "右半": "右侧",
+        "中间": "中间", "中央": "中间", "中心": "中间",
+        # English
+        "top-left": "top-left", "top right": "top-right",
+        "bottom-left": "bottom-left", "bottom right": "bottom-right",
+        "top ": "top", "bottom ": "bottom",
+        "left side": "left", "right side": "right",
+        "center": "center", "middle": "center",
+    }
+
+    for keyword, focus_area in region_keywords.items():
+        if keyword in combined:
+            return True, focus_area
+
+    # ── 2. Contextual clues that imply a specific region ─────────
+    # These patterns suggest the user is looking at a specific area
+    context_clues = {
+        # Navigation/header → top
+        "导航": "顶部", "nav": "顶部", "header": "顶部", "标题": "顶部",
+        "logo": "顶部", "菜单": "顶部", "menu": "顶部",
+        # Footer → bottom
+        "footer": "底部", "页脚": "底部", "底部导航": "底部",
+        # Sidebar → left or right
+        "侧边栏": "左侧", "sidebar": "左侧", "边栏": "左侧",
+        # Error messages → usually bottom or center
+        "错误信息": "底部", "error message": "底部", "报错": "底部",
+        "控制台": "底部", "console": "底部",
+        # Buttons → usually bottom or right
+        "按钮": "底部", "button": "底部", "提交": "底部", "submit": "底部",
+        # Input fields → usually center
+        "输入框": "中间", "input": "中间", "表单": "中间", "form": "中间",
+    }
+
+    for keyword, focus_area in context_clues.items():
+        if keyword in combined:
+            return True, focus_area
+
+    # ── 3. No focusing needed ────────────────────────────────────
+    return False, None
+
+
 def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mime=None, context=None, region=None, focus=None):
     """Send image to the configured vision model and return the answer.
 
@@ -803,6 +871,15 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
     # ── Smart question generation ──────────────────────────────────
     if context:
         question = smart_question(question, context)
+
+    # ── Smart focus detection ─────────────────────────────────────
+    # If user didn't explicitly specify focus/region, try to detect from context
+    if not focus and not region and (question or context):
+        should_focus, detected_focus = smart_focus(question, context)
+        if should_focus and detected_focus:
+            focus = detected_focus
+            # Append focus hint to question for the vision model
+            question = f"[请特别关注图片的{detected_focus}区域] {question}"
 
     # ── File size / data size check ────────────────────────────────
     if image_path:
