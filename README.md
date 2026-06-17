@@ -188,6 +188,36 @@ python add_eyes.py screenshot.png "分析左侧区域" --region "0,0,0.5,1"
 | 右侧 | right | 右半边 |
 | 中间 | center | 中心 1/2 |
 
+### 智能聚焦（自动检测）✨
+
+无需手动指定 `--focus`，根据对话上下文自动判断是否聚焦以及聚焦哪里：
+
+```bash
+# 自动聚焦：检测到"导航栏"→聚焦顶部
+python add_eyes.py screenshot.png "导航栏有问题" --context "我在设计一个网页"
+
+# 自动聚焦：检测到"报错"→聚焦底部
+python add_eyes.py screenshot.png "看下面的报错"
+
+# 自动聚焦：检测到"输入框"→聚焦中间
+python add_eyes.py screenshot.png "这个输入框是什么"
+
+# 不聚焦：没有区域线索→全图分析
+python add_eyes.py screenshot.png "分析整个页面"
+```
+
+**自动聚焦规则：**
+
+| 关键词 | 自动聚焦到 |
+|-------|-----------|
+| 左上角/右上角/左下角/右下角 | 对应 1/4 区域 |
+| 导航栏/nav/header/logo/菜单/标题 | 顶部 |
+| footer/页脚/底部导航 | 底部 |
+| 错误信息/报错/控制台/console | 底部 |
+| 按钮/button/提交/submit | 底部 |
+| 输入框/input/表单/form | 中间 |
+| 侧边栏/sidebar | 左侧 |
+
 ### 智能提问（带上下文）
 
 ```bash
