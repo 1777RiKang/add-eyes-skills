@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "add-eyes-skills"
-version = "2.0.0"
+version = "2.1.0"
 description = "Vision bridge for text-only LLMs — let DeepSeek V4, MiMo V2.5 Pro, etc. see images via external vision APIs"
 readme = "README.md"
 license = {text = "MIT"}
@@ -47,6 +47,7 @@ Issues = "https://github.com/1777RiKang/add-eyes-skills/issues"
 
 [project.scripts]
 add-eyes = "add_eyes:main"
+add-eyes-mcp = "mcp_server:main"
 
 [project.optional-dependencies]
 ocr = [
@@ -56,4 +57,4 @@ ocr = [
 ]
 
 [tool.setuptools]
-py-modules = ["add_eyes"]
+py-modules = ["add_eyes", "mcp_server"]

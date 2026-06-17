@@ -131,6 +131,54 @@ cp .github/copilot-instructions.md .github/
 
 ---
 
+## MCP 服务器（推荐）✨
+
+通过 MCP（Model Context Protocol）让纯文本模型**自动发现**视觉能力：
+
+### 安装后配置
+
+```json
+{
+  "mcpServers": {
+    "add-eyes": {
+      "command": "add-eyes-mcp",
+      "env": {
+        "MIMO_API_KEY": "your-key"
+      }
+    }
+  }
+}
+```
+
+或直接用 Python：
+
+```json
+{
+  "mcpServers": {
+    "add-eyes": {
+      "command": "python",
+      "args": ["path/to/mcp_server.py"]
+    }
+  }
+}
+```
+
+### MCP 工具
+
+| 工具 | 用途 |
+|------|------|
+| **see_image** | 分析图片，返回文字描述。模型自动发现并调用 |
+| **detect_backends** | 检测可用的视觉后端 |
+
+### 为什么用 MCP？
+
+| 方式 | 模型视角 | 可靠性 |
+|------|---------|--------|
+| CLI + 系统提示词 | "有人告诉我可以用这个" | 模型可能忽略 |
+| **MCP 工具** | **"我看到我有这个工具"** | **模型按需调用** |
+
+---
+
 ## 用法
 
 ### 基本使用
@@ -323,6 +371,9 @@ add-eyes-skills/
 ---
 
 ## 常见问题
+
+**Q: MCP 配置后模型还是说"看不见图片"？**
+A: 确保 MCP 服务器路径正确，重启 AI 客户端。MCP 工具需要客户端启动时加载。
 
 **Q: Ollama 安装后检测不到？**
 A: 确保 Ollama 已启动（`ollama serve`），然后运行 `python add_eyes.py --detect-backends`。

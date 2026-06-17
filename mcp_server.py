@@ -105,7 +105,7 @@ class MCPServer:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "add-eyes",
-                        "version": "2.0.0",
+                        "version": "2.1.0",
                     },
                 },
             }
@@ -205,11 +205,18 @@ server = MCPServer()
                                "(or English: top-left/bottom-right/center etc.)",
                 "default": "",
             },
+            "context": {
+                "type": "string",
+                "description": "Conversation context for smart question enhancement. "
+                               "E.g. 'debugging a login page with TypeError' or 'analyzing a UI design'. "
+                               "This helps generate a more targeted analysis.",
+                "default": "",
+            },
         },
         "required": ["image_path"],
     },
 )
-def see_image(image_path: str, question: str = "", model: str = "", focus: str = "") -> str:
+def see_image(image_path: str, question: str = "", model: str = "", focus: str = "", context: str = "") -> str:
     """Analyze an image and return text description."""
     if not question:
         question = "请详细描述这张图片的内容，包括布局、颜色、文字、元素等。"
@@ -228,6 +235,7 @@ def see_image(image_path: str, question: str = "", model: str = "", focus: str =
             question=question,
             model_name=model,
             focus=focus,
+            context=context if context else None,
         )
         return result
     except EnvironmentError as e:
@@ -241,24 +249,41 @@ def see_image(image_path: str, question: str = "", model: str = "", focus: str =
     name="detect_backends",
     description=(
         "Detect available vision backends (local Ollama models, cloud API keys). "
-        "Use this to check which vision models are available before calling see_image."
+        "Use this to check which vision models are available before calling see_image. "
+        "Returns JSON with available backends and recommended choice."
     ),
     input_schema={
         "type": "object",
-        "properties": {},
+        "properties": {
+            "format": {
+                "type": "string",
+                "enum": ["json", "text"],
+                "description": "Output format: 'json' for machine-readable, 'text' for human-readable",
+                "default": "json",
+            },
+        },
     },
 )
-def detect_backends_tool() -> str:
+def detect_backends_tool(format: str = "json") -> str:
     """Detect available vision backends."""
     try:
         result = auto_detect_backends()
         available = result.get("available", [])
         recommended = result.get("recommended", "none")
+
+        if format == "json":
+            return json.dumps({
+                "available": available,
+                "recommended": recommended,
+                "count": len(available),
+            }, ensure_ascii=False, indent=2)
+
+        # Text format
         if not available:
             return "No vision backends available. Install Ollama and pull minicpm-v, or set an API key."
         lines = [f"Available backends ({len(available)}):"]
         for b in available:
-            marker = " ⭐ recommended" if b == recommended else ""
+            marker = " * recommended" if b == recommended else ""
             lines.append(f"  - {b}{marker}")
         return "\n".join(lines)
     except Exception as e:
@@ -271,7 +296,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Add Eyes MCP Server")
     parser.add_argument("--transport", choices=["stdio", "http", "sse"], default="stdio",
-                        help="Transport mode (default: stdio)")
+                        help="Transport mode (default: stdio; http/sse not yet implemented)")
     parser.add_argument("--port", type=int, default=8765,
                         help="Port for HTTP/SSE transport (default: 8765)")
     args = parser.parse_args()
