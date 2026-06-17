@@ -585,13 +585,18 @@ def auto_route(message, attachments=None):
         result["needs_vision"] = True
 
     # ── 4. Check for vision-related keywords ──────────────────────
+    # Only trigger on strong signals that the user is talking about images
+    # Avoid weak signals like "这是什么" which could be about code/variables
     vision_keywords = [
-        # Chinese
-        "看这张图", "看图", "图片", "截图", "界面", "页面", "图表", "设计稿",
-        "帮我看看", "分析这个", "这是什么", "识别", "读取图片", "看看这个",
-        # English
-        "look at this", "this image", "the image", "screenshot", "picture", "diagram", "chart",
-        "analyze this", "what is this", "see this", "check this",
+        # Strong signals (explicitly about images)
+        "看这张图", "看图", "截图", "设计稿",
+        "这张图", "这张图片", "这张截图", "这张照片",
+        "图片内容", "图片里", "图片中",
+        "读取图片", "识别图片",
+        # English strong signals
+        "this image", "the image", "this screenshot",
+        "look at this image", "check this screenshot",
+        "what's in this image", "what does this image",
     ]
 
     for keyword in vision_keywords:
@@ -701,12 +706,17 @@ def auto_detect_backends():
             base_url_env = preset.get("base_url_env", "")
             base_url = os.environ.get(base_url_env, preset.get("default_base_url", ""))
 
+            # Mask API keys in URLs to prevent leaks
+            safe_url = base_url
+            if api_key and api_key in safe_url:
+                safe_url = safe_url.replace(api_key, f"{api_key[:6]}***")
+
             available.append(backend_name)
             details[backend_name] = {
                 "type": "cloud",
                 "api_key_env": api_key_env,
                 "base_url_env": base_url_env,
-                "base_url": base_url,
+                "base_url": safe_url,
                 "status": "available",
             }
 
@@ -764,8 +774,10 @@ def smart_question(question, context=None):
                      "指标", "metric", "报告", "report", "趋势", "trend", "可视化", "visualization"]
 
     # Error/debugging related (owns error/bug/debug keywords exclusively)
-    error_keywords = ["错误", "error", "异常", "exception", "bug", "问题", "issue", "失败", "fail",
-                      "崩溃", "crash", "日志", "log", "调试", "debug", "堆栈", "stack"]
+    # Note: "问题" is too generic (e.g. "布局问题" is UI, not error), so we use more specific error terms
+    error_keywords = ["错误", "error", "异常", "exception", "bug", "报错", "issue", "失败", "fail",
+                      "崩溃", "crash", "日志", "log", "调试", "debug", "堆栈", "stack", "traceback",
+                      "报错信息", "错误信息", "error message"]
 
     # Check if context matches any category
     is_code_context = any(kw in context_lower for kw in code_keywords)
@@ -881,6 +893,9 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
         should_focus, detected_focus = smart_focus(question, context)
         if should_focus and detected_focus:
             focus = detected_focus
+            # Notify user that auto-focus is being applied (transparency)
+            print(f"[auto-focus] 检测到区域线索，自动聚焦: {detected_focus}", file=sys.stderr)
+            print(f"[auto-focus] 如不需要聚焦，请使用 --focus none 显式禁用", file=sys.stderr)
             # Append focus hint to question for the vision model
             question = f"[请特别关注图片的{detected_focus}区域] {question}"
 
@@ -933,6 +948,9 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
 
     # ── Encode image (with optional region crop) ─────────────────
     if image_path:
+        # --focus none disables auto-focus
+        if focus == "none":
+            focus = None
         if region or focus:
             b64, mime = crop_region(image_path, region, focus)
         else:
