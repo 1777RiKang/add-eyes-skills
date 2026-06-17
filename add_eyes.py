@@ -44,6 +44,7 @@ if sys.platform == "win32":
 
 import base64
 import json
+import re
 import argparse
 import urllib.request
 import urllib.error
@@ -574,29 +575,27 @@ def auto_route(message, attachments=None):
                     result["image_paths"].append(path)
 
     # ── 2. Check for image references in message ──────────────────
-    # Pattern 1: Reasonix attachments (case-insensitive for extension)
-    import re
-    attachment_pattern = r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
-    matches = re.findall(attachment_pattern, message_lower)
-    if matches:
+    # Pattern 1: Reasonix attachments
+    _re_attach = re.compile(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', re.IGNORECASE)
+    for match in _re_attach.finditer(message):
         result["needs_vision"] = True
-        for match in re.finditer(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message, re.IGNORECASE):
-            result["image_paths"].append(match.group(0))
+        result["image_paths"].append(match.group(0))
 
     # Pattern 2: Generic file paths (Windows C:\... or Unix /...)
-    generic_path_pattern = r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
-    path_matches = re.findall(generic_path_pattern, message_lower)
-    if path_matches:
-        result["needs_vision"] = True
-        for match in re.finditer(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', message, re.IGNORECASE):
-            if match.group(0) not in result["image_paths"]:
-                result["image_paths"].append(match.group(0))
+    _re_path = re.compile(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', re.IGNORECASE)
+    for match in _re_path.finditer(message):
+        if match.group(0) not in result["image_paths"]:
+            result["needs_vision"] = True
+            result["image_paths"].append(match.group(0))
 
-    # ── 3. Check for image file references ────────────────────────
-    image_file_pattern = r'[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)'
-    file_matches = re.findall(image_file_pattern, message_lower)
-    if file_matches:
-        result["needs_vision"] = True
+    # ── 3. Check for standalone image file references ─────────────
+    # Require file name to be a standalone token (preceded by space/start, followed by space/end/punctuation)
+    _re_file = re.compile(r'(?:^|[\s(]|[@/\\])([\w.-]+\.(?:png|jpg|jpeg|gif|webp|bmp))(?:[\s).,;!?]|$)', re.IGNORECASE)
+    for match in _re_file.finditer(message):
+        fname = match.group(1)
+        if fname not in result["image_paths"]:
+            result["needs_vision"] = True
+            result["image_paths"].append(fname)
 
     # ── 4. Check for vision-related keywords ──────────────────────
     # Only trigger on strong signals that the user is talking about images
@@ -907,7 +906,7 @@ def smart_focus(question, context=None):
         # English
         "top-left": "top-left", "top right": "top-right",
         "bottom-left": "bottom-left", "bottom right": "bottom-right",
-        "top ": "top", "bottom ": "bottom",
+        "top": "top", "bottom": "bottom",
         "left side": "left", "right side": "right",
         "center": "center", "middle": "center",
     }
@@ -916,24 +915,20 @@ def smart_focus(question, context=None):
         if keyword in combined:
             return True, focus_area
 
-    # ── 2. Contextual clues that imply a specific region ─────────
-    # These patterns suggest the user is looking at a specific area
+    # ── 2. Contextual clues — only detect category, don't assume position ──
+    # "按钮" could be anywhere. "导航" is usually top. "footer" is usually bottom.
+    # But "错误信息" could be in a modal, sidebar, or inline — don't hardcode position.
+    # Only detect categories that have strong positional consensus:
     context_clues = {
-        # Navigation/header → top
-        "导航": "顶部", "nav": "顶部", "header": "顶部", "标题": "顶部",
+        # Strong positional consensus (90%+ of cases)
+        "导航": "顶部", "nav": "顶部", "header": "顶部",
         "logo": "顶部", "菜单": "顶部", "menu": "顶部",
-        # Footer → bottom
         "footer": "底部", "页脚": "底部", "底部导航": "底部",
-        # Sidebar → left or right
         "侧边栏": "左侧", "sidebar": "左侧", "边栏": "左侧",
-        # Error messages → usually bottom or center
-        "错误信息": "底部", "error message": "底部", "报错": "底部",
-        "控制台": "底部", "console": "底部",
-        # Buttons → usually bottom or right
-        "按钮": "底部", "button": "底部", "提交": "底部", "submit": "底部",
-        # Input fields → usually center
-        "输入框": "中间", "input": "中间", "表单": "中间", "form": "中间",
     }
+    # Removed: 按钮, button, 输入框, input, 报错, error message, console
+    # These are too position-ambiguous — let the vision model see the whole image
+    # instead of cropping to an assumed position.
 
     for keyword, focus_area in context_clues.items():
         if keyword in combined:
@@ -1102,10 +1097,17 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
                 break  # Success, exit retry loop
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            # 5xx = server error → retry; 4xx = client error → fail immediately
-            if e.code >= 500 and attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                print(f"[warn] Server error ({e.code}), retrying in {wait_time}s... ({attempt+1}/{max_retries})", file=sys.stderr)
+            # 429 = rate limit → retry with longer wait (use Retry-After header if available)
+            # 5xx = server error → retry
+            retryable = (e.code == 429 or e.code >= 500)
+            if retryable and attempt < max_retries - 1:
+                # For 429, use Retry-After header or longer base wait
+                if e.code == 429:
+                    retry_after = e.headers.get("Retry-After")
+                    wait_time = int(retry_after) if retry_after else (2 ** (attempt + 2))  # 4, 8, 16s
+                else:
+                    wait_time = 2 ** attempt  # 1, 2, 4s
+                print(f"[warn] HTTP {e.code}, retrying in {wait_time}s... ({attempt+1}/{max_retries})", file=sys.stderr)
                 import time
                 time.sleep(wait_time)
                 last_error = e
@@ -1205,6 +1207,9 @@ def main():
     parser.add_argument("--detect-backends", "-db",
                         action="store_true",
                         help="Auto-detect available vision backends (returns JSON)")
+    parser.add_argument("--version", "-V",
+                        action="version",
+                        version="Add Eyes Skills v2.0.0")
 
     args = parser.parse_args()
 
@@ -1295,6 +1300,13 @@ def main():
         if args.ocr:
             print(f"[ocr]   enabled (fallback when no API key)")
         print("-" * 50)
+
+    # Apply smart_question enhancement if context provided
+    enhanced_question = args.question
+    if args.context:
+        enhanced_question = smart_question(args.question, args.context)
+        if args.verbose and enhanced_question != args.question:
+            print(f"[enhanced] {enhanced_question}")
 
     # Parse region if provided
     region = None
