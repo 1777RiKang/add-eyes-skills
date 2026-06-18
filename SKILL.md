@@ -1,10 +1,25 @@
 ---
 name: add-eyes
-description: Vision bridge for text-only models (DeepSeek V4, etc.). Invoke when user pastes an image and your model cannot see it — this skill delegates to external vision APIs and returns a description.
+description: Vision bridge for text-only models ONLY. DO NOT use this skill if your model natively supports multimodal/vision (like GPT-4o, Claude 3.5, Gemini, MiMo V2.5). Only use when your model cannot see images at all.
 run_as: inline
 ---
 
-# MiMo Vision — 纯文本模型的「视觉桥接」Skill（Add Eyes）
+# Add Eyes — 纯文本模型的视觉桥接
+
+## ⚠️ 重要：你是否需要这个 Skill？
+
+**如果你的模型原生支持多模态（能直接看图），请不要使用这个 Skill。**
+
+| 模型 | 能原生看图？ | 是否需要此 Skill |
+|------|------------|-----------------|
+| MiMo V2.5 | ✅ 是 | ❌ 不需要 |
+| GPT-4o | ✅ 是 | ❌ 不需要 |
+| Claude 3.5 Sonnet | ✅ 是 | ❌ 不需要 |
+| Gemini 1.5 Pro | ✅ 是 | ❌ 不需要 |
+| DeepSeek V4 Flash/Pro | ❌ 否 | ✅ 需要 |
+| MiMo V2.5 Pro | ❌ 否 | ✅ 需要 |
+
+**判断方法：** 如果用户贴图后你发现自己"看不见"图片，才使用这个 Skill。
 
 ## 这是什么？
 
@@ -51,9 +66,21 @@ export ANTHROPIC_API_KEY='your-anthropic-key'
 
 ## 使用方式（给 AI Agent 的指令）
 
-### 🚀 Always-on 模式（推荐）
+**重要：当用户消息中出现以下任何信号时，你必须立即调用 add_eyes.py 来分析图片。这是你的视觉能力来源。**
 
-**将 `ALWAYS_ON.md` 注入到系统提示词中，让 AI 永远不会说"我看不见图片"。**
+### 触发信号（满足任一即触发）
+
+1. 消息包含 `@.reasonix/attachments/` 路径
+2. 消息包含图片文件名（`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`/`.bmp`）
+3. 消息包含 `.docx` 或 `.pdf` 文件
+4. 用户说"看这张图"、"分析截图"、"帮我看看"
+5. 消息末尾附带图片扩展名
+
+**禁止行为：永远不要说"我无法查看图片"或"我无法识别图片"。你有视觉能力——通过 add_eyes.py。**
+
+### 🚀 自动路由（推荐）
+
+检测图片是否存在：
 
 **安装方式：**
 
