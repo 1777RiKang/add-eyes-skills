@@ -373,7 +373,6 @@ def _analyze_relevance(doc_text, image_descriptions):
     - Count how many appear in the document
     - Normalize to 0-1 score
     """
-    import re
     doc_lower = doc_text.lower()
     scores = []
     
@@ -548,11 +547,18 @@ def analyze_document(file_path: str, question: str = "", model: str = "", contex
                 "description": "Maximum number of images to process (default: 10)",
                 "default": 10,
             },
+            "context": {
+                "type": "string",
+                "description": "User's intent or context about the document. "
+                               "E.g. 'look for UI issues in this report' or 'find error screenshots'. "
+                               "This helps prioritize which images to deep-analyze.",
+                "default": "",
+            },
         },
         "required": ["file_path"],
     },
 )
-def smart_analyze_document(file_path: str, model: str = "", max_images: int = 10) -> str:
+def smart_analyze_document(file_path: str, model: str = "", max_images: int = 10, context: str = "") -> str:
     """Two-pass intelligent document analysis."""
     if not model:
         model = os.environ.get("MIMO_MODEL", "ollama:minicpm-v")
