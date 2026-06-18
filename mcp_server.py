@@ -330,7 +330,97 @@ def _extract_images_from_pdf(pdf_path):
     return images  # Empty list = PDF has no images
 
 
-# ── Tool: analyze_document ──────────────────────────────────────────
+# ── Helper: extract text from documents ─────────────────────────────
+def _extract_text_from_docx(docx_path):
+    """Extract text content from a .docx file."""
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+        texts = []
+        with zipfile.ZipFile(docx_path, 'r') as z:
+            with z.open('word/document.xml') as f:
+                tree = ET.parse(f)
+                for elem in tree.iter():
+                    if elem.text and elem.text.strip():
+                        texts.append(elem.text.strip())
+        return '\n'.join(texts)
+    except Exception:
+        return ""
+
+
+def _extract_text_from_pdf(pdf_path):
+    """Extract text content from a PDF file (requires PyMuPDF)."""
+    try:
+        import fitz
+    except ImportError:
+        return None  # None = PyMuPDF not installed
+    
+    doc = fitz.open(pdf_path)
+    texts = []
+    for page in doc:
+        text = page.get_text()
+        if text.strip():
+            texts.append(text.strip())
+    return '\n'.join(texts)
+
+
+# ── Helper: analyze relevance between text and image descriptions ───
+def _analyze_relevance(doc_text, image_descriptions):
+    """Score how relevant each image is to the document text.
+    
+    Simple keyword matching approach:
+    - Extract keywords from image descriptions
+    - Count how many appear in the document
+    - Normalize to 0-1 score
+    """
+    import re
+    doc_lower = doc_text.lower()
+    scores = []
+    
+    for desc in image_descriptions:
+        if not desc:
+            scores.append(0.0)
+            continue
+        
+        # Extract meaningful keywords (3+ chars, not common words)
+        words = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', desc.lower())
+        stop_words = {'the', 'and', 'for', 'this', 'that', 'with', 'from', 'are', 'was', 'has',
+                      '的', '是', '在', '了', '和', '与', '或', '这', '那', '有', '为'}
+        keywords = [w for w in words if w not in stop_words]
+        
+        if not keywords:
+            scores.append(0.0)
+            continue
+        
+        matches = sum(1 for kw in keywords if kw in doc_lower)
+        score = min(matches / max(len(keywords), 1), 1.0)
+        scores.append(round(score, 2))
+    
+    return scores
+
+
+# ── Helper: generate targeted question from context ─────────────────
+def _generate_targeted_question(doc_text, image_desc, image_index):
+    """Generate a targeted question based on document context."""
+    # Find relevant context around where this image might be mentioned
+    desc_keywords = [w for w in image_desc.split() if len(w) > 2][:5]
+    
+    best_context = ""
+    for keyword in desc_keywords:
+        idx = doc_text.lower().find(keyword.lower())
+        if idx >= 0:
+            start = max(0, idx - 100)
+            end = min(len(doc_text), idx + 200)
+            best_context = doc_text[start:end]
+            break
+    
+    if best_context:
+        return f"这张图片在文档中的相关上下文：\"{best_context[:300]}\"\n\n请结合文档上下文，详细分析这张图片的内容、结构和关键信息。"
+    else:
+        return "请详细描述这张图片的内容，包括布局、颜色、文字、元素等。"
+
+
+# ── Tool: smart_analyze_document ────────────────────────────────────
 @server.tool(
     name="analyze_document",
     description=(
@@ -428,6 +518,144 @@ def analyze_document(file_path: str, question: str = "", model: str = "", contex
                 pass
 
     return f"文档 {os.path.basename(file_path)} 共提取 {len(images)} 张图片:\n\n" + "\n\n".join(results)
+
+
+# ── Tool: smart_analyze_document ────────────────────────────────────
+@server.tool(
+    name="smart_analyze_document",
+    description=(
+        "Intelligently analyze a document in two passes. "
+        "Pass 1 (quick scan): read document text and do basic image recognition (one sentence per image). "
+        "Pass 2 (deep analysis): based on document context, analyze only the most relevant images "
+        "with targeted questions and focus regions. "
+        "Use this INSTEAD OF analyze_document when you want a thorough, context-aware analysis. "
+        "This produces better results than analyze_document because it focuses on what matters."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Absolute path to the document file (.docx or .pdf)",
+            },
+            "model": {
+                "type": "string",
+                "description": "Vision backend to use (default: auto-detect)",
+                "default": "",
+            },
+            "max_images": {
+                "type": "integer",
+                "description": "Maximum number of images to process (default: 10)",
+                "default": 10,
+            },
+        },
+        "required": ["file_path"],
+    },
+)
+def smart_analyze_document(file_path: str, model: str = "", max_images: int = 10) -> str:
+    """Two-pass intelligent document analysis."""
+    if not model:
+        model = os.environ.get("MIMO_MODEL", "ollama:minicpm-v")
+
+    if not os.path.isfile(file_path):
+        return f"Error: File not found: {file_path}"
+
+    ext = os.path.splitext(file_path)[1].lower()
+    basename = os.path.basename(file_path)
+
+    # ── Extract text ─────────────────────────────────────────────
+    if ext == '.docx':
+        doc_text = _extract_text_from_docx(file_path)
+        images = _extract_images_from_docx(file_path)
+    elif ext == '.pdf':
+        doc_text = _extract_text_from_pdf(file_path)
+        if doc_text is None:
+            return "Error: PyMuPDF not installed. Install it: pip install pymupdf"
+        images = _extract_images_from_pdf(file_path)
+        if images is None:
+            return "Error: PyMuPDF not installed. Install it: pip install pymupdf"
+    else:
+        return f"Error: Unsupported format '{ext}'. Supported: .docx, .pdf"
+
+    if not images:
+        return f"No images found in {basename}"
+
+    images = images[:max_images]
+
+    # ── Pass 1: Quick scan ────────────────────────────────────────
+    output_parts = [f"# 智能分析: {basename}\n"]
+
+    if doc_text:
+        output_parts.append(f"## 文档摘要\n{doc_text[:500]}...\n")
+
+    output_parts.append("## 阶段 1: 快速扫描\n")
+
+    basic_descriptions = []
+    for i, img_path in enumerate(images):
+        try:
+            desc = ask_with_image(
+                image_path=img_path,
+                question="用一句话简要描述这张图片的核心内容。",
+                model_name=model,
+            )
+            basic_descriptions.append(desc)
+            output_parts.append(f"**图{i+1}**: {desc[:100]}")
+        except Exception as e:
+            basic_descriptions.append(f"[Error: {e}]")
+            output_parts.append(f"**图{i+1}**: [分析失败]")
+
+    # ── Analyze relevance ─────────────────────────────────────────
+    if doc_text:
+        relevance_scores = _analyze_relevance(doc_text, basic_descriptions)
+    else:
+        relevance_scores = [0.5] * len(images)  # No text → all equally relevant
+
+    output_parts.append("\n## 关联度分析\n")
+    for i, (desc, score) in enumerate(zip(basic_descriptions, relevance_scores)):
+        level = "⭐高" if score >= 0.3 else "📎中" if score >= 0.1 else "💤低"
+        output_parts.append(f"图{i+1}: {level} ({score:.0%}) — {desc[:60]}")
+
+    # ── Pass 2: Deep analysis on relevant images ──────────────────
+    output_parts.append("\n## 阶段 2: 深度分析\n")
+
+    deep_count = 0
+    for i, (img_path, desc, score) in enumerate(zip(images, basic_descriptions, relevance_scores)):
+        if score >= 0.3:  # High relevance → deep analysis
+            deep_count += 1
+            targeted_q = _generate_targeted_question(doc_text or "", desc, i)
+            try:
+                deep_result = ask_with_image(
+                    image_path=img_path,
+                    question=targeted_q,
+                    model_name=model,
+                    context=doc_text[:500] if doc_text else None,
+                )
+                output_parts.append(f"### 图{i+1} (相关度: {score:.0%}) — 重点分析\n{deep_result}")
+            except Exception as e:
+                output_parts.append(f"### 图{i+1} (相关度: {score:.0%}) — 分析失败: {e}")
+        elif score >= 0.1:
+            output_parts.append(f"### 图{i+1} (相关度: {score:.0%}) — 简要描述\n{desc}")
+        else:
+            output_parts.append(f"### 图{i+1} (相关度: {score:.0%}) — 跳过（与文档内容无关）")
+
+    # Cleanup temp files
+    for img_path in images:
+        try:
+            os.unlink(img_path)
+        except OSError:
+            pass
+
+    # ── Summary ───────────────────────────────────────────────────
+    high_count = sum(1 for s in relevance_scores if s >= 0.3)
+    mid_count = sum(1 for s in relevance_scores if 0.1 <= s < 0.3)
+    low_count = sum(1 for s in relevance_scores if s < 0.1)
+
+    output_parts.append(f"\n## 总结\n文档 {basename} 共 {len(images)} 张图片: "
+                        f"⭐高相关 {high_count} 张（深度分析）, "
+                        f"📎中相关 {mid_count} 张（简要描述）, "
+                        f"💤低相关 {low_count} 张（跳过）")
+
+    return "\n\n".join(output_parts)
 
 
 # ── Entry point ─────────────────────────────────────────────────────
