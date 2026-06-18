@@ -575,11 +575,18 @@ def auto_route(message, attachments=None):
                     result["image_paths"].append(path)
 
     # ── 2. Check for image references in message ──────────────────
-    # Pattern 1: Reasonix attachments
-    _re_attach = re.compile(r'@\.reasonix/attachments/[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', re.IGNORECASE)
+    # Pattern 1: Reasonix attachments - convert to actual filesystem path
+    _re_attach = re.compile(r'@\.reasonix/attachments/([^\s]+\.(png|jpg|jpeg|gif|webp|bmp))', re.IGNORECASE)
     for match in _re_attach.finditer(message):
         result["needs_vision"] = True
-        result["image_paths"].append(match.group(0))
+        # Convert @.reasonix/attachments/xxx.png to actual path
+        filename = match.group(1)
+        actual_path = os.path.join(os.environ.get("APPDATA", ""), "reasonix", "global-workspace", ".reasonix", "attachments", filename)
+        if os.path.isfile(actual_path):
+            result["image_paths"].append(actual_path)
+        else:
+            # Fallback: try relative path
+            result["image_paths"].append(match.group(0))
 
     # Pattern 2: Generic file paths (Windows C:\... or Unix /...)
     _re_path = re.compile(r'(?:[A-Za-z]:\\|[~/])[^\s]+\.(png|jpg|jpeg|gif|webp|bmp)', re.IGNORECASE)
@@ -752,6 +759,28 @@ def auto_detect_backends():
         "recommended": recommended,
         "details": details,
     }
+
+
+def _resolve_path(path):
+    """Resolve image path, converting Reasonix references to actual filesystem paths."""
+    if not path:
+        return path
+    
+    # Handle Reasonix attachment references
+    if path.startswith('@.reasonix/attachments/'):
+        filename = path.split('/')[-1]
+        # Try standard Reasonix location
+        appdata = os.environ.get("APPDATA", "")
+        actual = os.path.join(appdata, "reasonix", "global-workspace", ".reasonix", "attachments", filename)
+        if os.path.isfile(actual):
+            return actual
+        # Fallback: try home directory
+        home = os.path.expanduser("~")
+        actual = os.path.join(home, ".reasonix", "attachments", filename)
+        if os.path.isfile(actual):
+            return actual
+    
+    return path
 
 
 def smart_question(question, context=None):
@@ -972,6 +1001,7 @@ def ask_with_image(image_path=None, question=None, model_name=None, b64=None, mi
 
     # ── File size / data size check ────────────────────────────────
     if image_path:
+        image_path = _resolve_path(image_path)
         file_size_mb = os.path.getsize(image_path) / (1024 * 1024)
         if file_size_mb > 10:
             raise ValueError(
@@ -1289,6 +1319,9 @@ def main():
         return
 
     # ── File mode ─────────────────────────────────────────────────
+    # Resolve Reasonix attachment paths
+    args.image_path = _resolve_path(args.image_path)
+    
     if not os.path.isfile(args.image_path):
         print(f"Error: file not found: {args.image_path}")
         sys.exit(1)

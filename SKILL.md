@@ -152,12 +152,19 @@ python "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\add-eyes-skills
 
 ### 步骤 1：定位图片
 
+**Reasonix 附件实际路径：** `C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\.reasonix\attachments\`
+
+当消息中出现 `@.reasonix/attachments/xxx.png` 时，实际文件路径是：
+```
+C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\.reasonix\attachments\xxx.png
+```
+
 按以下优先级快速找到：
 
 1. **用户提供了路径** → 直接用
-2. **检查 `~/Pictures/Screenshots/` 下最新文件** → `ls -lt ~/Pictures/Screenshots/*.png | head -3`
-3. **搜一轮就停**：只在截图目录和当前 session temp 目录搜一次
-4. **找不到就立即问用户** → ❌ **禁止全盘反复搜索！** 贴图可能被 IDE 直接内嵌在消息里不落盘。
+2. **消息中有 `@.reasonix/attachments/` 引用** → 替换为上面的实际路径
+3. **检查附件目录最新文件** → `Get-ChildItem "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\.reasonix\attachments\*.png" | Sort-Object LastWriteTime -Descending | Select-Object -First 3`
+4. **找不到就立即问用户** → ❌ **禁止全盘反复搜索！**
 
 ### 步骤 2：决定视觉后端
 
