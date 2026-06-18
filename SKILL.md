@@ -99,7 +99,7 @@ export ANTHROPIC_API_KEY='your-anthropic-key'
 **首次使用时，自动检测可用的视觉后端：**
 
 ```bash
-python "<skill_dir>/add_eyes.py" --detect-backends
+python "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\add-eyes-skills\add_eyes.py" --detect-backends
 ```
 
 **输出示例：**
@@ -128,7 +128,7 @@ python add_eyes.py screenshot.png "描述这张图" --model ollama:minicpm-v
 如果不想注入系统提示词，可以使用自动路由：
 
 ```bash
-python "<skill_dir>/add_eyes.py" --auto-route "<用户消息>"
+python "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\add-eyes-skills\add_eyes.py" --auto-route "<用户消息>"
 ```
 
 **自动路由会：**
@@ -171,7 +171,7 @@ python "<skill_dir>/add_eyes.py" --auto-route "<用户消息>"
 ### 步骤 3：执行视觉分析
 
 ```bash
-python "<skill_dir>/add_eyes.py" "<absolute_image_path>" "<question>" [--model <vision_backend>] --context "<对话上下文>"
+python "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\add-eyes-skills\add_eyes.py" "<absolute_image_path>" "<question>" --model ollama:minicpm-v --context "<对话上下文>"
 ```
 
 **重要：使用 `--context` 参数传递对话上下文，启用智能提问！**
@@ -206,7 +206,7 @@ python "<skill_dir>/add_eyes.py" "<absolute_image_path>" "<question>" [--model <
 
 查看完整列表：
 ```bash
-python "<skill_dir>/add_eyes.py" --list-models
+python "C:\Users\shi_h\AppData\Roaming\reasonix\global-workspace\add-eyes-skills\add_eyes.py" --list-models
 ```
 
 ## 典型场景
